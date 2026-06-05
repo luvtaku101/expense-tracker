@@ -346,6 +346,7 @@ body {
   cursor: pointer;
   color: var(--ink2);
 }
+.currency-btn.active { background: var(--ink) !important; color: var(--cream) !important; border-color: var(--ink) !important; }
 .btn-danger-outline {
   padding: 8px 16px;
   border: 1px solid #e86060;
@@ -410,7 +411,7 @@ body {
     <div class="app-name">My Expenses</div>
     <div class="header-date" id="header-date"></div>
   </div>
-  <div class="header-total">This month: <span id="header-total">£0.00</span></div>
+  <div class="header-total">This month: <span id="header-total">£0.00</span> <span id="currency-badge" style="font-size:11px;background:var(--cream3);padding:2px 7px;border-radius:10px;font-family:'DM Sans',sans-serif;font-weight:500;color:var(--ink2);cursor:pointer;" onclick="showTab('settings')" title="Change currency">£ GBP</span></div>
 </div>
 
 <div id="tab-add" class="section active">
@@ -441,7 +442,7 @@ body {
     <div class="form-group">
       <label>Amount</label>
       <div class="amount-wrap">
-        <span class="amount-prefix">£</span>
+        <span class="amount-prefix" id="amount-prefix">£</span>
         <input type="number" id="inp-amount" placeholder="0.00" step="0.01" min="0" inputmode="decimal">
       </div>
     </div>
@@ -520,6 +521,36 @@ body {
   <p style="font-size:13px;color:var(--ink3);margin-bottom:16px;">All data is saved locally on this device.</p>
 
   <div class="card">
+    <div class="card-label">Currency</div>
+    <div class="settings-row">
+      <div>
+        <div class="settings-label">Display currency</div>
+        <div class="settings-sub">Used across all tabs and exports</div>
+      </div>
+      <div style="display:flex;gap:6px;">
+        <button id="curr-gbp" class="btn-outline currency-btn active" onclick="setCurrency('GBP')">£ GBP</button>
+        <button id="curr-hkd" class="btn-outline currency-btn" onclick="setCurrency('HKD')">HK$ HKD</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-label">Receipt scan (AI)</div>
+    <div class="settings-row" style="flex-direction:column;align-items:flex-start;gap:8px;">
+      <div>
+        <div class="settings-label">Gemini API Key</div>
+        <div class="settings-sub">Get your free key at aistudio.google.com · Stored only on this device</div>
+      </div>
+      <div style="display:flex;gap:8px;width:100%;">
+        <input type="password" id="gemini-key-input" placeholder="AIza…" autocomplete="off"
+          style="flex:1;padding:10px 14px;border:1px solid var(--border);border-radius:10px;background:var(--cream);font-family:'DM Sans',sans-serif;font-size:14px;color:var(--ink);">
+        <button onclick="saveGeminiKey()" style="padding:10px 16px;background:var(--ink);color:var(--cream);border:none;border-radius:10px;font-family:'DM Sans',sans-serif;font-size:14px;cursor:pointer;font-weight:500;">Save</button>
+      </div>
+      <div id="gemini-key-status" style="font-size:12px;color:var(--ink3);"></div>
+    </div>
+  </div>
+
+  <div class="card">
     <div class="card-label">Custom categories</div>
     <div class="new-cat-row">
       <input type="text" id="new-cat-input" placeholder="New category name…" autocomplete="off">
@@ -568,7 +599,159 @@ body {
 
 <div class="toast" id="toast"></div>
 
+<!-- Receipt scan FAB -->
+<button id="scan-fab" onclick="triggerScan()" title="Scan receipt" style="position:fixed;bottom:88px;right:18px;width:52px;height:52px;border-radius:50%;background:#e8729a;color:white;border:none;font-size:22px;cursor:pointer;z-index:150;box-shadow:0 4px 14px rgba(232,114,154,0.45);display:flex;align-items:center;justify-content:center;" aria-label="Scan receipt">📷</button>
+<input type="file" id="scan-input" accept="image/*" capture="environment" style="display:none" onchange="handleScanFile(event)">
+
+<!-- Scan overlay -->
+<div id="scan-overlay" style="display:none;position:fixed;inset:0;background:rgba(44,42,37,.6);z-index:300;align-items:flex-end;justify-content:center;">
+  <div style="background:var(--cream);border-radius:24px 24px 0 0;padding:24px 20px 36px;width:100%;max-width:480px;">
+    <div style="font-family:'Lora',serif;font-size:17px;margin-bottom:6px;">📷 Scanning receipt…</div>
+    <div id="scan-status" style="font-size:13px;color:var(--ink2);margin-bottom:16px;">Sending to Gemini AI…</div>
+    <div style="height:4px;background:var(--cream3);border-radius:4px;overflow:hidden;"><div id="scan-bar" style="height:100%;background:#e8729a;width:0%;border-radius:4px;transition:width .4s ease;"></div></div>
+    <button onclick="cancelScan()" style="margin-top:16px;width:100%;padding:12px;background:none;border:1px solid var(--border);border-radius:12px;font-family:'DM Sans',sans-serif;font-size:14px;cursor:pointer;color:var(--ink2);">Cancel</button>
+  </div>
+</div>
+
 <script>
+// ── Currency ──────────────────────────────────────────────────────────────
+const CURRENCIES = {
+  GBP: { symbol: '£', code: 'GBP', label: '£ GBP' },
+  HKD: { symbol: 'HK$', code: 'HKD', label: 'HK$ HKD' }
+};
+function getCurrency() { return localStorage.getItem('currency') || 'GBP'; }
+function currSym() { return CURRENCIES[getCurrency()].symbol; }
+function setCurrency(code) {
+  localStorage.setItem('currency', code);
+  document.querySelectorAll('.currency-btn').forEach(b => b.classList.remove('active'));
+  const btn = ge('curr-' + code.toLowerCase());
+  if(btn) btn.classList.add('active');
+  ge('currency-badge').textContent = CURRENCIES[code].label;
+  const pfx = ge('amount-prefix');
+  if(pfx) pfx.textContent = CURRENCIES[code].symbol;
+  updateHeaderTotal();
+  if(ge('tab-log').classList.contains('active')) renderLog();
+  if(ge('tab-summary').classList.contains('active')) renderSummary();
+  showToast('Currency set to ' + CURRENCIES[code].label + ' ✓');
+}
+
+// ── Gemini key ─────────────────────────────────────────────────────────────
+function getGeminiKey() { return localStorage.getItem('gemini_api_key') || ''; }
+function saveGeminiKey() {
+  const v = ge('gemini-key-input').value.trim();
+  if(!v) { showToast('Please enter your API key'); return; }
+  localStorage.setItem('gemini_api_key', v);
+  ge('gemini-key-status').textContent = '✓ Key saved';
+  ge('gemini-key-status').style.color = '#3dbb8a';
+  showToast('Gemini key saved ✓');
+}
+
+// ── Receipt scan ────────────────────────────────────────────────────────────
+let scanActive = false;
+function triggerScan() {
+  if(!getGeminiKey()) {
+    showToast('Add your Gemini API key in Settings first');
+    showTab('settings');
+    return;
+  }
+  ge('scan-input').value = '';
+  ge('scan-input').click();
+}
+function cancelScan() {
+  scanActive = false;
+  ge('scan-overlay').style.display = 'none';
+}
+async function handleScanFile(e) {
+  const file = e.target.files[0];
+  if(!file) return;
+  const key = getGeminiKey();
+  if(!key) { showToast('Add your Gemini API key in Settings first'); return; }
+  scanActive = true;
+  const overlay = ge('scan-overlay');
+  overlay.style.display = 'flex';
+  const bar = ge('scan-bar');
+  const status = ge('scan-status');
+  bar.style.width = '20%';
+  status.textContent = 'Reading image…';
+
+  try {
+    // Convert to base64
+    const b64 = await new Promise((res, rej) => {
+      const r = new FileReader();
+      r.onload = () => res(r.result.split(',')[1]);
+      r.onerror = rej;
+      r.readAsDataURL(file);
+    });
+    bar.style.width = '45%';
+    status.textContent = 'Asking Gemini AI…';
+
+    const cats = allCats().join(', ');
+    const prompt = `You are a receipt parser. Analyse this receipt image and return ONLY a JSON object (no markdown, no explanation) with these fields:
+{
+  "description": "merchant name (short, 2-3 words max)",
+  "amount": number (total amount paid, no currency symbol),
+  "date": "YYYY-MM-DD",
+  "category": "one of: ${cats}",
+  "notes": "optional short note or empty string"
+}
+If you cannot determine a field, use null for date, 0 for amount, and "Others" for category.`;
+
+    const resp = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${key}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{
+            parts: [
+              { text: prompt },
+              { inline_data: { mime_type: file.type || 'image/jpeg', data: b64 } }
+            ]
+          }]
+        })
+      }
+    );
+
+    if(!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err?.error?.message || 'Gemini API error ' + resp.status);
+    }
+
+    bar.style.width = '80%';
+    status.textContent = 'Processing result…';
+
+    const data = await resp.json();
+    const raw = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    const clean = raw.replace(/```json|```/g,'').trim();
+    let parsed;
+    try { parsed = JSON.parse(clean); } catch(e) { throw new Error('Could not parse Gemini response'); }
+
+    bar.style.width = '100%';
+    if(!scanActive) return;
+    overlay.style.display = 'none';
+
+    // Fill the Add form
+    showTab('add');
+    if(parsed.description) ge('inp-desc').value = parsed.description;
+    if(parsed.amount && parsed.amount > 0) ge('inp-amount').value = parsed.amount.toFixed(2);
+    if(parsed.date) ge('inp-date').value = parsed.date;
+    if(parsed.category) {
+      const cats = allCats();
+      const match = cats.find(c => c.toLowerCase() === (parsed.category||'').toLowerCase());
+      if(match) ge('inp-cat').value = match;
+    }
+    if(parsed.notes) ge('inp-notes').value = parsed.notes;
+    showToast('Receipt scanned ✓ — please review & save');
+
+  } catch(err) {
+    if(!scanActive) return;
+    overlay.style.display = 'none';
+    showToast('Scan failed: ' + (err.message || 'unknown error'));
+    console.error('Scan error:', err);
+  }
+}
+
+// ───────────────────────────────────────────────────────────────────────────
 const BASE_CATS = ['Dining out','Groceries','Transportation','Children expenses','Clothing','Skincare','Utilities','Home projects','Others'];
 const CAT_META = {
   'Dining out':        {bg:'var(--cat-dining-bg)',    txt:'var(--cat-dining-txt)',    dot:'var(--cat-dining-dot)',    bar:'#e8729a', emoji:'🍽️'},
@@ -651,7 +834,7 @@ function updateHeaderTotal() {
   const now = new Date();
   const ym = now.toISOString().slice(0,7);
   const total = getExpenses().filter(e=>e.date.startsWith(ym)).reduce((s,e)=>s+e.amount,0);
-  ge('header-total').textContent = '£'+total.toFixed(2);
+  ge('header-total').textContent = currSym()+total.toFixed(2);
 }
 
 function renderLog() {
@@ -663,7 +846,7 @@ function renderLog() {
   if(cat) expenses = expenses.filter(e=>e.category===cat);
   if(method) expenses = expenses.filter(e=>e.method===method);
   const total = expenses.reduce((s,e)=>s+e.amount,0);
-  ge('log-total').textContent = expenses.length + ' expense' + (expenses.length!==1?'s':'') + ' · £' + total.toFixed(2);
+  ge('log-total').textContent = expenses.length + ' expense' + (expenses.length!==1?'s':'') + ' · ' + currSym() + total.toFixed(2);
   const el = ge('expense-list');
   if(!expenses.length) {
     el.innerHTML=`<div class="empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg><p>No expenses found</p></div>`;
@@ -696,7 +879,7 @@ function renderLog() {
           ${e.notes?`<div style="font-size:12px;color:var(--ink3);margin-top:3px;font-style:italic">${e.notes}</div>`:''}
         </div>
         <div class="expense-right">
-          <div class="expense-amount">£${e.amount.toFixed(2)}</div>
+          <div class="expense-amount">${currSym()}${e.amount.toFixed(2)}</div>
           <button class="delete-btn" onclick="deleteExpense(${e.id})" aria-label="Delete">✕</button>
         </div>
       </div>`;
@@ -717,7 +900,7 @@ function renderSummary() {
   let expenses = getExpenses();
   if(month) expenses = expenses.filter(e=>e.date.startsWith(month));
   const total = expenses.reduce((s,e)=>s+e.amount,0);
-  ge('s-total').textContent = '£'+total.toFixed(2);
+  ge('s-total').textContent = currSym()+total.toFixed(2);
   ge('s-count').textContent = expenses.length;
   if(month) {
     const d = new Date(month+'-01');
@@ -728,7 +911,7 @@ function renderSummary() {
   const sorted = Object.entries(bycat).sort((a,b)=>b[1]-a[1]);
   if(sorted.length) {
     ge('s-top').textContent = sorted[0][0];
-    ge('s-top-amt').textContent = '£'+sorted[0][1].toFixed(2);
+    ge('s-top-amt').textContent = currSym()+sorted[0][1].toFixed(2);
   } else { ge('s-top').textContent='—'; ge('s-top-amt').textContent=''; }
   const chart = ge('cat-chart');
   if(!sorted.length){ chart.innerHTML='<div class="empty" style="padding:20px"><p>No data yet</p></div>'; }
@@ -740,7 +923,7 @@ function renderSummary() {
       return `<div class="bar-row">
         <span class="bar-label" title="${cat}">${cat}</span>
         <div class="bar-track"><div class="bar-fill" style="width:${pct}%;background:${cm.bar}"></div></div>
-        <span class="bar-amt">£${amt.toFixed(2)}</span>
+        <span class="bar-amt">${currSym()}${amt.toFixed(2)}</span>
       </div>`;
     }).join('');
   }
@@ -758,7 +941,7 @@ function renderSummary() {
       return `<div class="bar-row">
         <span class="bar-label">${m}</span>
         <div class="bar-track"><div class="bar-fill" style="width:${pct}%;background:${col}"></div></div>
-        <span class="bar-amt">£${amt.toFixed(2)}</span>
+        <span class="bar-amt">${currSym()}${amt.toFixed(2)}</span>
       </div>`;
     }).join('');
   }
@@ -770,6 +953,18 @@ function renderSettings() {
   el.innerHTML = customs.length
     ? customs.map((c,i)=>`<span class="custom-cat-tag" onclick="removeCustomCat(${i})">${c} <span>×</span></span>`).join('')
     : '<span style="font-size:13px;color:var(--ink3)">No custom categories yet — add one above</span>';
+  // Gemini key
+  const k = getGeminiKey();
+  if(k) {
+    ge('gemini-key-input').value = k;
+    ge('gemini-key-status').textContent = '✓ Key saved';
+    ge('gemini-key-status').style.color = '#3dbb8a';
+  }
+  // Currency buttons
+  const code = getCurrency();
+  document.querySelectorAll('.currency-btn').forEach(b => b.classList.remove('active'));
+  const btn = ge('curr-' + code.toLowerCase());
+  if(btn) btn.classList.add('active');
 }
 
 function addCustomCat() {
@@ -797,7 +992,7 @@ function removeCustomCat(i) {
 function exportCSV() {
   const expenses = getExpenses();
   if(!expenses.length){ showToast('No expenses to export'); return; }
-  const rows = [['Date','Description','Category','Amount (£)','Method','Notes']];
+  const rows = [['Date','Description','Category','Amount ('+getCurrency()+')','Method','Notes']];
   expenses.forEach(e=>rows.push([e.date, e.description, e.category, e.amount.toFixed(2), e.method, e.notes||'']));
   const csv = rows.map(r=>r.map(v=>'"'+String(v).replace(/"/g,'""')+'"').join(',')).join('\n');
   const blob = new Blob([csv], {type:'text/csv'});
@@ -829,6 +1024,11 @@ function clearAll() {
   ge('filter-method').addEventListener('change', renderLog);
   ge('summary-month').addEventListener('change', renderSummary);
   populateCatSelects();
+  // Apply saved currency
+  const savedCurr = getCurrency();
+  ge('currency-badge').textContent = CURRENCIES[savedCurr].label;
+  const pfx = ge('amount-prefix');
+  if(pfx) pfx.textContent = CURRENCIES[savedCurr].symbol;
   updateHeaderTotal();
 })();
 </script>

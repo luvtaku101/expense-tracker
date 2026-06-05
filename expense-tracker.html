@@ -704,7 +704,7 @@ If you cannot determine a field, use null for date, 0 for amount, and "Others" f
         ]
       }]
     });
-    const models = ['gemini-2.0-flash', 'gemini-1.5-flash'];
+    const models = ['gemini-1.5-flash', 'gemini-2.0-flash'];
     let resp, lastErr;
     for(const model of models) {
       resp = await fetch(
@@ -714,7 +714,7 @@ If you cannot determine a field, use null for date, 0 for amount, and "Others" f
       if(resp.ok) break;
       const errJson = await resp.json().catch(()=>({}));
       lastErr = errJson?.error?.message || ('Gemini API error ' + resp.status);
-      const isQuota = resp.status === 429 || (lastErr||'').toLowerCase().includes('quota');
+      const isQuota = resp.status === 429 || (lastErr||'').toLowerCase().includes('quota') || (lastErr||'').toLowerCase().includes('not supported');
       if(!isQuota) throw new Error(lastErr); // non-quota error, no point retrying
       status.textContent = `${model} quota reached, trying fallback…`;
     }

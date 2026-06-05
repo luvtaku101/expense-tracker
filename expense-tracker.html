@@ -715,10 +715,13 @@ If you cannot determine a field, use null for date, 0 for amount, and "Others" f
       if(resp.ok) break;
       const errJson = await resp.json().catch(()=>({}));
       lastErr = errJson?.error?.message || ('Gemini API error ' + resp.status);
-      const isFallback = resp.status === 429 || resp.status === 400 || resp.status === 403 ||
+      const isFallback = resp.status === 429 || resp.status === 400 || resp.status === 403 || resp.status === 503 ||
         (lastErr||'').toLowerCase().includes('quota') ||
         (lastErr||'').toLowerCase().includes('not supported') ||
-        (lastErr||'').toLowerCase().includes('free_tier');
+        (lastErr||'').toLowerCase().includes('free_tier') ||
+        (lastErr||'').toLowerCase().includes('high demand') ||
+        (lastErr||'').toLowerCase().includes('overload') ||
+        (lastErr||'').toLowerCase().includes('temporarily');
       if(!isFallback) break;
       status.textContent = `${model} failed, trying next…`;
     }
